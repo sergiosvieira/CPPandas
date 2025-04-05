@@ -28,33 +28,38 @@ int main(int argc, char* argv[]) {
         df_selection.info();
         std::cout << std::endl;
 
-        // Gerar estatísticas descritivas com percentis personalizados
-        std::vector<double> percentiles = {0.2, 0.5, 0.7};
-        auto desc = df_selection.describe(percentiles);
+        // Criar um StandardScaler para normalizar os dados
+        CPPandas::StandardScaler scaler;
+        auto df_selection_scaled = scaler.fit_transform(df_selection);
 
-        // Adicionar variância
-        std::vector<double> varValues;
-        for (const auto& colName : df_selection.headers()) {
-            varValues.push_back(df_selection.var(colName));
-        }
-        desc.loc("var") = varValues;
+        // Visualizar os primeiros registros dos dados normalizados
+        std::cout << "Dados normalizados (primeiras 5 linhas):" << std::endl;
+        df_selection_scaled.head(5);
+        std::cout << std::endl;
 
-        // Adicionar moda
-        std::vector<double> modeValues;
-        auto modes = df_selection.mode();
-        for (size_t i = 0; i < df_selection.headers().size(); ++i) {
-            modeValues.push_back(modes.iloc(0));
-        }
-        desc.loc("mode") = modeValues;
+        // Mostrar estatísticas dos dados normalizados
+        auto desc_scaled = df_selection_scaled.describe();
+        std::cout << "Estatísticas dos dados normalizados:" << std::endl;
+        desc_scaled.print();
+        std::cout << std::endl;
 
-        // Adicionar quartis (já está incluído no describe padrão, mas vamos demonstrar como adicionar manualmente)
-        desc.loc("q1") = df_selection.quantile(0.25);
-        desc.loc("q2") = df_selection.quantile(0.5);
-        desc.loc("q3") = df_selection.quantile(0.75);
+        // Criar um boxplot dos dados normalizados
+        CPPandas::BoxPlot::plot(df_selection_scaled,
+                                "Boxplot das Features Selecionadas (StandardScaler)",
+                                "Features",
+                                "boxplot_features.html");
 
-        // Exibir estatísticas descritivas
-        std::cout << "Estatísticas descritivas:" << std::endl;
-        desc.print();
+        std::cout << "Boxplot gerado em 'boxplot_features.html'" << std::endl;
+        std::cout << "Por favor, abra este arquivo em um navegador para visualizar o gráfico." << std::endl;
+
+        df_selection.hist(30, "histograma_features.html");
+
+        // Método 2: Alternativa usando a classe Histogram (similar à interface de BoxPlot)
+        CPPandas::Histogram::plot(df_selection, 30, "histograma_features2.html");
+
+        std::cout << "Histogramas gerados em 'histograma_features.html' e 'histograma_features2.html'" << std::endl;
+        std::cout << "Por favor, abra estes arquivos em um navegador para visualizar os gráficos." << std::endl;
+
 
     } catch (const CPPandas::ColumnNotFoundException& e) {
         std::cerr << e.what() << std::endl;

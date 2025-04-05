@@ -49,6 +49,7 @@ class ColumnNotFoundException : public std::exception {
         }
 };
 
+
 class StatisticalSummary {
 private:
     std::vector<std::string> m_index;
@@ -918,9 +919,361 @@ public:
 
         return modeValue;
     }
+
+    /**
+ * @brief Extensão da classe DataFrame para criar histogramas
+ */
+    void hist(int bins = 30, const std::string& filename = "") const {
+        // Gerar nome de arquivo automático se não for fornecido
+        std::string outputFile = filename;
+        if (outputFile.empty()) {
+            outputFile = "histogram_" + std::to_string(std::time(nullptr)) + ".html";
+        }
+
+        // Preparar os dados para os histogramas
+        std::vector<std::vector<double>> histData;
+        std::vector<std::string> colNames;
+
+        // Determinar colunas numéricas
+        for (const auto& colName : m_activeColumns) {
+            auto column = getColumn(colName);
+
+            // Verificar se a coluna é numérica (pelo menos 70% dos valores não vazios são numéricos)
+            size_t numericCount = 0;
+            size_t nonEmptyCount = 0;
+
+            for (const auto& value : column) {
+                if (!value.empty()) {
+                    nonEmptyCount++;
+                    try {
+                        std::stod(value);
+                        numericCount++;
+                    } catch (...) {
+                        // Não é numérico
+                    }
+                }
+            }
+
+            double numericRatio = nonEmptyCount > 0 ? static_cast<double>(numericCount) / nonEmptyCount : 0.0;
+
+            if (numericRatio >= 0.7) {
+                auto numericValues = columnToNumeric(column);
+
+                // Filtrar valores NaN
+                std::vector<double> validValues;
+                for (double value : numericValues) {
+                    if (!std::isnan(value)) {
+                        validValues.push_back(value);
+                    }
+                }
+
+                if (!validValues.empty()) {
+                    histData.push_back(validValues);
+                    colNames.push_back(colName);
+                }
+            }
+        }
+
+        // Calcular o número de linhas e colunas para o subplot grid
+        int numCols = 2;  // Número de colunas no grid
+        int numRows = (histData.size() + numCols - 1) / numCols;  // Número de linhas arredondado para cima
+
+        // Gerar o arquivo HTML
+        std::ofstream htmlFile(outputFile);
+        if (!htmlFile.is_open()) {
+            throw std::runtime_error("Não foi possível criar o arquivo HTML para os histogramas");
+        }
+
+        htmlFile << "<!DOCTYPE html>\n"
+                 << "<html>\n"
+                 << "<head>\n"
+                 << "    <meta charset=\"UTF-8\">\n"
+                 << "    <title>Histogramas</title>\n"
+                 << "    <script src=\"https://cdn.plot.ly/plotly-latest.min.js\"></script>\n"
+                 << "</head>\n"
+                 << "<body>\n"
+                 << "    <div id=\"histogram\" style=\"width:1000px;height:" << numRows * 400 << "px;\"></div>\n"
+                 << "    <script>\n"
+                 << "        var data = [];\n"
+                 << "        var layout = {\n"
+                 << "            grid: {rows: " << numRows << ", columns: " << numCols << ", pattern: 'independent'},\n"
+                 << "            showlegend: false,\n"
+                 << "            margin: {l: 50, r: 20, t: 50, b: 50}\n"
+                 << "        };\n\n";
+
+        // Adicionar cada histograma
+        for (size_t i = 0; i < histData.size(); ++i) {
+            int row = i / numCols + 1;
+            int col = i % numCols + 1;
+
+            htmlFile << "        var trace" << i << " = {\n"
+                     << "            x: [";
+
+            for (size_t j = 0; j < histData[i].size(); ++j) {
+                htmlFile << histData[i][j];
+                if (j < histData[i].size() - 1) {
+                    htmlFile << ", ";
+                }
+            }
+
+            htmlFile << "],\n"
+                     << "            type: 'histogram',\n"
+                     << "            nbinsx: " << bins << ",\n"
+                     << "            name: '" << colNames[i] << "',\n"
+                     << "            xaxis: 'x" << (i+1) << "',\n"
+                     << "            yaxis: 'y" << (i+1) << "'\n"
+                     << "        };\n"
+                     << "        data.push(trace" << i << ");\n"
+                     << "        layout['xaxis" << (i+1) << "'] = {domain: [], title: '" << colNames[i] << "'};\n"
+                     << "        layout['yaxis" << (i+1) << "'] = {domain: []};\n";
+        }
+
+        htmlFile << "\n        Plotly.newPlot('histogram', data, layout);\n"
+                 << "    </script>\n"
+                 << "</body>\n"
+                 << "</html>\n";
+
+        htmlFile.close();
+
+        std::cout << "Histogramas gerados em: " << outputFile << std::endl;
+        std::cout << "Abra o arquivo em um navegador para visualizar os gráficos." << std::endl;
+    }
+};
+
+/**
+ * @class Histogram
+ * @brief Utilidade para criar histogramas dos dados
+ */
+class Histogram {
+public:
+    /**
+     * @brief Gera um arquivo HTML contendo histogramas para cada coluna numérica
+     * @param df DataFrame com os dados para os histogramas
+     * @param bins Número de bins para cada histograma
+     * @param filename Nome do arquivo HTML a ser gerado (opcional)
+     * @return Nome do arquivo gerado
+     */
+    static std::string plot(const DataFrame& df, int bins = 30, const std::string& filename = "") {
+        df.hist(bins, filename);
+        return filename.empty() ?
+                   "histogram_" + std::to_string(std::time(nullptr)) + ".html" : filename;
+    }
+};
+
+class StandardScaler {
+private:
+    std::vector<double> m_means;
+    std::vector<double> m_stds;
+    bool m_fitted;
+
+public:
+    StandardScaler() : m_fitted(false) {}
+
+    /**
+     * @brief Calcula as médias e desvios padrão das colunas
+     * @param df DataFrame com os dados a serem analisados
+     * @return Referência para este objeto para permitir encadeamento de métodos
+     */
+    StandardScaler& fit(const DataFrame& df) {
+        m_means.clear();
+        m_stds.clear();
+
+        for (const auto& colName : df.headers()) {
+            m_means.push_back(df.mean(colName));
+            m_stds.push_back(df.std(colName));
+        }
+
+        m_fitted = true;
+        return *this;
+    }
+
+    /**
+     * @brief Normaliza os dados usando as estatísticas já calculadas
+     * @param df DataFrame com os dados a serem normalizados
+     * @return Novo DataFrame com os dados normalizados
+     */
+    DataFrame transform(const DataFrame& df) const {
+        if (!m_fitted) {
+            throw std::runtime_error("StandardScaler não foi ajustado. Chame fit() primeiro.");
+        }
+
+        if (df.headers().size() != m_means.size()) {
+            throw std::invalid_argument("O número de colunas no DataFrame não corresponde ao que foi usado no fit()");
+        }
+
+        // Criar um CSV temporário para o resultado
+        CSV::DataFrame transformedData;
+        transformedData.reserve(df.rowCount());
+
+        for (size_t rowIdx = 0; rowIdx < df.rowCount(); ++rowIdx) {
+            CSV::Row row = df.getRow(rowIdx);
+            CSV::Row transformedRow;
+
+            for (size_t colIdx = 0; colIdx < row.size(); ++colIdx) {
+                double value = DataFrame::toDouble(row[colIdx]);
+
+                if (std::isnan(value) || m_stds[colIdx] == 0) {
+                    transformedRow.push_back("");  // Manter NaN ou não-numérico como NaN
+                } else {
+                    double scaledValue = (value - m_means[colIdx]) / m_stds[colIdx];
+                    // Converter para string com precisão controlada
+                    std::ostringstream ss;
+                    ss << std::fixed << std::setprecision(6) << scaledValue;
+                    transformedRow.push_back(ss.str());
+                }
+            }
+
+            transformedData.push_back(transformedRow);
+        }
+
+        // Criar um CSV temporário com os dados transformados
+        std::string tempFilename = "temp_scaled_" + std::to_string(reinterpret_cast<uintptr_t>(this)) + ".csv";
+        std::ofstream file(tempFilename);
+
+        // Escrever cabeçalho
+        for (size_t i = 0; i < df.headers().size(); ++i) {
+            if (i > 0) file << ',';
+            file << df.headers()[i];
+        }
+        file << '\n';
+
+        // Escrever dados transformados
+        for (const auto& row : transformedData) {
+            for (size_t i = 0; i < row.size(); ++i) {
+                if (i > 0) file << ',';
+                file << row[i];
+            }
+            file << '\n';
+        }
+
+        file.close();
+
+        // Carregar como novo DataFrame
+        CSV csv;
+        csv.load(tempFilename);
+
+        // Remover o arquivo temporário
+        std::remove(tempFilename.c_str());
+
+        return DataFrame(csv);
+    }
+
+    /**
+     * @brief Ajusta e transforma em uma única operação
+     * @param df DataFrame com os dados a serem ajustados e transformados
+     * @return Novo DataFrame com os dados normalizados
+     */
+    DataFrame fit_transform(const DataFrame& df) {
+        fit(df);
+        return transform(df);
+    }
 };
 
 
+/**
+ * @class BoxPlot
+ * @brief Utilidade para criar boxplots dos dados
+ */
+class BoxPlot {
+public:
+    /**
+     * @brief Gera um arquivo HTML contendo um boxplot
+     * @param df DataFrame com os dados para o boxplot
+     * @param title Título do gráfico
+     * @param xlabel Rótulo do eixo X
+     * @param filename Nome do arquivo HTML a ser gerado (opcional)
+     * @return Nome do arquivo gerado
+     */
+    static std::string plot(const DataFrame& df, const std::string& title,
+                            const std::string& xlabel, const std::string& filename = "") {
+        // Gerar nome de arquivo automático se não for fornecido
+        std::string outputFile = filename;
+        if (outputFile.empty()) {
+            outputFile = "boxplot_" + std::to_string(std::time(nullptr)) + ".html";
+        }
+
+        // Preparar dados para o boxplot
+        std::vector<std::vector<double>> boxplotData;
+        std::vector<std::string> labels;
+
+        for (const auto& colName : df.headers()) {
+            auto column = df.getColumn(colName);
+            std::vector<double> numericValues = df.columnToNumeric(column);
+
+            // Filtrar valores NaN
+            std::vector<double> validValues;
+            for (double value : numericValues) {
+                if (!std::isnan(value)) {
+                    validValues.push_back(value);
+                }
+            }
+
+            boxplotData.push_back(validValues);
+            labels.push_back(colName);
+        }
+
+        // Gerar HTML com plotly.js
+        std::ofstream htmlFile(outputFile);
+        if (!htmlFile.is_open()) {
+            throw std::runtime_error("Não foi possível criar o arquivo HTML para o boxplot");
+        }
+
+        htmlFile << "<!DOCTYPE html>\n"
+                 << "<html>\n"
+                 << "<head>\n"
+                 << "    <meta charset=\"UTF-8\">\n"
+                 << "    <title>" << title << "</title>\n"
+                 << "    <script src=\"https://cdn.plot.ly/plotly-latest.min.js\"></script>\n"
+                 << "</head>\n"
+                 << "<body>\n"
+                 << "    <div id=\"boxplot\" style=\"width:900px;height:600px;\"></div>\n"
+                 << "    <script>\n"
+                 << "        var data = [\n";
+
+        for (size_t i = 0; i < boxplotData.size(); ++i) {
+            htmlFile << "            {\n"
+                     << "                y: [";
+
+            for (size_t j = 0; j < boxplotData[i].size(); ++j) {
+                htmlFile << boxplotData[i][j];
+                if (j < boxplotData[i].size() - 1) {
+                    htmlFile << ", ";
+                }
+            }
+
+            htmlFile << "],\n"
+                     << "                type: 'box',\n"
+                     << "                name: '" << labels[i] << "'\n"
+                     << "            }";
+
+            if (i < boxplotData.size() - 1) {
+                htmlFile << ",";
+            }
+
+            htmlFile << "\n";
+        }
+
+        htmlFile << "        ];\n\n"
+                 << "        var layout = {\n"
+                 << "            title: '" << title << "',\n"
+                 << "            xaxis: {\n"
+                 << "                title: '" << xlabel << "'\n"
+                 << "            },\n"
+                 << "            boxmode: 'group'\n"
+                 << "        };\n\n"
+                 << "        Plotly.newPlot('boxplot', data, layout);\n"
+                 << "    </script>\n"
+                 << "</body>\n"
+                 << "</html>\n";
+
+        htmlFile.close();
+
+        std::cout << "Boxplot gerado em: " << outputFile << std::endl;
+        std::cout << "Abra o arquivo em um navegador para visualizar o gráfico." << std::endl;
+
+        return outputFile;
+    }
+};
 
 class CPPandas {
 public:
