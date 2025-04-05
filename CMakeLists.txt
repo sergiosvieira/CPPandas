@@ -73,3 +73,26 @@ if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+option(BUILD_DOCS "Build documentation" OFF)
+
+if(BUILD_DOCS)
+  find_package(Doxygen REQUIRED)
+  
+  set(DOXYGEN_INPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+  set(DOXYGEN_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/docs)
+  set(DOXYGEN_INDEX_FILE ${DOXYGEN_OUTPUT_DIR}/html/index.html)
+  set(DOXYFILE_IN ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in)
+  set(DOXYFILE_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+  
+  # Configure o arquivo Doxyfile
+  configure_file(${DOXYFILE_IN} ${DOXYFILE_OUT} @ONLY)
+  
+  # Adicione um alvo personalizado para a documentação
+  add_custom_target(docs
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYFILE_OUT}
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    COMMENT "Gerando documentação API com Doxygen"
+    VERBATIM
+  )
+endif()

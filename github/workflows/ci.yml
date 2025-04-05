@@ -1,0 +1,171 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:  # Permite execução manual
+
+jobs:
+  lint:
+    name: Lint e Formatação
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Instalar clang-format
+        run: sudo apt-get install -y clang-format
+      - name: Verificar formatação do código
+        run: |
+          find include src tests -name "*.hpp" -o -name "*.cpp" -o -name "*.h" -o -name "*.c" | xargs clang-format --dry-run --Werror
+
+build:
+    name: ${{ matrix.config.name }}
+    needs: lint
+    runs-on: ${{ matrix.config.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          # Windows - Visual Studio
+          - {
+            name: "Windows MSVC 2022 (x64/Release)",
+            os: windows-latest,
+            build_type: "Release",
+            cc: "cl", cxx: "cl",
+            architecture: "x64",
+            generators: "Visual Studio 17 2022",
+            build_shared: "ON",
+            cmake_extra: "-A x64"
+          }
+          # Ubuntu - GCC
+          - {
+            name: "Ubuntu GCC 11 (Release)",
+            os: ubuntu-latest,
+            build_type: "Release",
+            cc: "gcc-11", cxx: "g++-11",
+            architecture: "x64", 
+            generators: "Ninja",
+            build_shared: "ON",
+            cmake_extra: "-DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11"
+          }
+          # macOS - Clang
+          - {
+            name: "macOS Latest Clang (Release)",
+            os: macos-latest,
+            build_type: "Release",
+            cc: "clang", cxx: "clang++",
+            architecture: "x64",
+            generators: "Ninja",
+            build_shared: "ON",
+            cmake_extra: ""
+          }
+
+steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      # Configuração do ambiente para cada plataforma
+      - name: Setup Windows Environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.config.architecture }}
+
+      - name: Setup Linux Environment
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+
+          # Instalar compiladores específicos
+          if [[ "${{ matrix.config.cc }}" == "gcc-11" ]]; then
+            sudo apt-get install -y gcc-11 g++-11
+          fi
+
+      - name: Setup macOS Environment
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja
+
+      # Configuração do CMake
+      - name: Configure CMake
+        shell: bash
+        run: |
+          cmake -B build \
+            -G "${{ matrix.config.generators }}" \
+            -DCMAKE_BUILD_TYPE=${{ matrix.config.build_type }} \
+            -DBUILD_SHARED_LIBS=${{ matrix.config.build_shared }} \
+            -DBUILD_TESTS=ON \
+            ${{ matrix.config.cmake_extra }}
+
+      # Compilação
+      - name: Build
+        shell: bash
+        run: |
+          cmake --build build --config ${{ matrix.config.build_type }}
+
+      # Executar testes
+      - name: Run Tests
+        shell: bash
+        working-directory: build
+        run: |
+          if [ "${{ runner.os }}" == "Windows" ]; then
+            ctest -C ${{ matrix.config.build_type }} --output-on-failure
+          else
+            ctest --output-on-failure
+          fi
+
+release:
+    name: Publicar Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      # Baixar todos os artefatos de compilação
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      # Criar release no GitHub
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*
+          draft: false
+          prerelease: contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha')
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+docs:
+    name: Documentação
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      - name: Build Documentation
+        run: |
+          cmake -B build -DBUILD_DOCS=ON
+          cmake --build build --target docs
+
+      # Publicar para GitHub Pages
+      - name: Deploy Documentation to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/docs/html
+          publish_branch: gh-pages
+          force_orphan: true
