@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(CPPandas VERSION 1.0.0 LANGUAGES CXX)
 
 # Configurar opções modernas de C++
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -11,7 +11,7 @@ option(BUILD_TESTS "Construct tests" ON)
 
 # Definir biblioteca
 add_library(${PROJECT_NAME} 
-    src/csv.cpp
+    src/cppandas.cpp
 )
 
 # Configurar diretórios de include
@@ -78,16 +78,16 @@ option(BUILD_DOCS "Build documentation" OFF)
 
 if(BUILD_DOCS)
   find_package(Doxygen REQUIRED)
-  
+
   set(DOXYGEN_INPUT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
   set(DOXYGEN_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/docs)
   set(DOXYGEN_INDEX_FILE ${DOXYGEN_OUTPUT_DIR}/html/index.html)
   set(DOXYFILE_IN ${CMAKE_CURRENT_SOURCE_DIR}/Doxyfile.in)
   set(DOXYFILE_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
-  
+
   # Configure o arquivo Doxyfile
   configure_file(${DOXYFILE_IN} ${DOXYFILE_OUT} @ONLY)
-  
+
   # Adicione um alvo personalizado para a documentação
   add_custom_target(docs
     COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYFILE_OUT}
