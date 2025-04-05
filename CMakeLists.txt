@@ -11,6 +11,7 @@ option(BUILD_TESTS "Construct tests" ON)
 
 # Definir biblioteca
 add_library(${PROJECT_NAME} 
+    src/csv.cpp
     src/cppandas.cpp
 )
 
@@ -95,4 +96,19 @@ if(BUILD_DOCS)
     COMMENT "Gerando documentação API com Doxygen"
     VERBATIM
   )
+endif()
+
+# Adicionar opção para compilar exemplos
+option(BUILD_EXAMPLES "Build examples" OFF)
+
+if(BUILD_EXAMPLES)
+    add_executable(csv_simple_example examples/csv_simple_example.cpp)
+    target_link_libraries(csv_simple_example PRIVATE ${PROJECT_NAME})
+    add_executable(csv_benchmark examples/csv_benchmark.cpp)
+    target_link_libraries(csv_benchmark PRIVATE ${PROJECT_NAME})
+    add_executable(water_quality_example examples/water_quality_example.cpp)
+    target_link_libraries(water_quality_example PRIVATE ${PROJECT_NAME})
+    file(INSTALL ${CMAKE_CURRENT_SOURCE_DIR}/examples/dataset/
+        DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+        FILES_MATCHING PATTERN "*.csv")
 endif()
